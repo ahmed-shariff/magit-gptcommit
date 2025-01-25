@@ -81,8 +81,8 @@ Now write Commit message in follow template: [label]:[one line of summary] :
 ")
 
 (defcustom magit-gptcommit-prompt magit-gptcommit-prompt-one-line
-  "The prompt that was used to generate the commit message."
-  :type 'string
+  "The prompt or a function that returns the prompt that was used to generate the commit message."
+  :type '(choice string function)
   :group 'magit-gptcommit)
 
 ;; (defun magit-gptcommit-load-prompt ()
@@ -233,13 +233,12 @@ SECTION is determined by CONDITION, which is defined in `magit-section-match'."
       (goto-char (oref target start))
       target)))
 
-
-(defun magit-gptcommit--retrieve-stashed-diff ()
+(defun magit-gptcommit--retrieve-stashed-diff (prompt)
   "Retrieve stashed diff.
 assuming current section is staged section."
   (let* ((section (magit-current-section))
          ;; HACK:  1 token ~= 4 chars
-         (max-char (- (* 4 magit-gptcommit-max-token) (length magit-gptcommit-prompt)))
+         (max-char (- (* 4 magit-gptcommit-max-token) (length prompt)))
          (diffs (mapcar
                  (lambda (child)
                    (with-slots (start end) child
@@ -288,7 +287,10 @@ NO-CACHE is non-nil if cache should be ignored."
                (magit-insert-section--parent magit-root-section))
 
       (magit-repository-local-delete 'magit-gptcommit--last-message)
-      (let* ((diff (magit-gptcommit--retrieve-stashed-diff))
+      (let* ((prompt (if (functionp magit-gptcommit-prompt)
+                         (funcall magit-gptcommit-prompt)
+                       magit-gptcommit-prompt))
+             (diff (magit-gptcommit--retrieve-stashed-diff prompt))
              (key (magit-gptcommit--cache-key diff))
              (worker (magit-repository-local-get 'magit-gptcommit--active-worker))
              (oldkey (and worker (oref worker key))))
@@ -322,7 +324,7 @@ NO-CACHE is non-nil if cache should be ignored."
                                           (make-magit-gptcommit--worker
                                            ;; NOTE: process is never used anywhere?
                                            :key key))
-              (gptel-request (format magit-gptcommit-prompt diff)
+              (gptel-request (format prompt diff)
                 :callback #'magit-gptcommit--stream-insert-response
                 :buffer buf
                 :position (point-marker)
