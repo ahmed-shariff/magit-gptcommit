@@ -103,6 +103,16 @@ Now write Commit message in follow template: [label]:[one line of summary] :
 ;;                                               (write-region (point-min) (point-max) file-path)
 ;;                                               (setq magit-gptcommit-prompt (buffer-string)))))))))
 
+(defcustom magit-gptcommit-gptel-backend nil
+  "The backend to use for `gptel-request'. If nil, will use value of `gptel-backend'."
+  :type '(restricted-sexp :tag "gptel-backend" :match-alternatives (gptel-backend-p 'nil))
+  :group 'magit-gptcommit)
+
+(defcustom magit-gptcommit-gptel-model nil
+  "The model to use for `gptel-request'. If nil, will use value of `gptel-model'."
+  :type 'symbol
+  :group 'magit-gptcommit)
+
 (defcustom magit-gptcommit-max-token 4096
   "Max token length."
   :type 'integer
@@ -324,19 +334,21 @@ NO-CACHE is non-nil if cache should be ignored."
                                           (make-magit-gptcommit--worker
                                            ;; NOTE: process is never used anywhere?
                                            :key key))
-              (gptel-request (format prompt diff)
-                :callback #'magit-gptcommit--stream-insert-response
-                :buffer buf
-                :position (point-marker)
-                :fsm (gptel-make-fsm
-                      :state 'INIT
-                      :table gptel-request--transitions
-                      :handlers '((WAIT gptel--handle-wait)
-                                  (ERRS magit-gptcommit--handle-errs gptel--fsm-last)
-                                  ;; FIXME: this is useful?
-                                  (TOOL gptel--handle-tool-use)
-                                  (TYPE magit-gptcommit--handle-type)
-                                  (DONE magit-gptcommit--handle-done gptel--fsm-last))))))
+              (let ((gptel-backend (or magit-gptcommit-gptel-backend gptel-backend))
+                    (gptel-model (or magit-gptcommit-gptel-model gptel-model)))
+                (gptel-request (format prompt diff)
+                  :callback #'magit-gptcommit--stream-insert-response
+                  :buffer buf
+                  :position (point-marker)
+                  :fsm (gptel-make-fsm
+                        :state 'INIT
+                        :table gptel-request--transitions
+                        :handlers '((WAIT gptel--handle-wait)
+                                    (ERRS magit-gptcommit--handle-errs gptel--fsm-last)
+                                    ;; FIXME: this is useful?
+                                    (TOOL gptel--handle-tool-use)
+                                    (TYPE magit-gptcommit--handle-type)
+                                    (DONE magit-gptcommit--handle-done gptel--fsm-last)))))))
           ;; store section in repository-local active worker
           (let ((section (car (last (oref magit-root-section children))))
                 (worker (magit-repository-local-get 'magit-gptcommit--active-worker)))
