@@ -856,7 +856,8 @@ correctly this function will error."
         ('gptel
          (unless (featurep 'gptel)
            (magit-gptcommit--debug "Loading gptel")
-           (require 'gptel)))
+           (require 'gptel)
+           (require 'gptel-request)))
         (_
          (magit-gptcommit--debug "Unknown backend `%s'" magit-gptcommit-backend)
          (user-error "Unknown backend `%s'" magit-gptcommit-backend)))
@@ -1020,6 +1021,11 @@ See `magit-gptcommit--llm-chat-streaming' for parameter documentation."
     (magit-gptcommit--debug "Worker created and stored in repository-local variable")))
 
 ;;;; gptel
+(defvar magit-gptcommit--gptel-handlers '((WAIT gptel--handle-wait)
+                                          (ERRS magit-gptcommit--handle-errs gptel--fsm-last)
+                                          (TYPE magit-gptcommit--handle-type)
+                                          (DONE magit-gptcommit--handle-done gptel--fsm-last)))
+
 (defun magit-gptcommit--handle-done (fsm)
   "Handler for gptel DONE state in FSM."
   (magit-gptcommit--debug "gptel in DONE state")
@@ -1099,12 +1105,13 @@ Call CALLBACK with the response and INFO with partial and full responses."
                      (TOOL . ((,#'gptel--error-p       . ERRS)
                               (,#'gptel--tool-result-p . WAIT)
                               (t                       . DONE))))
-            :handlers '((WAIT gptel--handle-wait)
-                        (ERRS magit-gptcommit--handle-errs gptel--fsm-last)
-                        ;; FIXME: this is useful?
-                        (TOOL gptel--handle-tool-use)
-                        (TYPE magit-gptcommit--handle-type)
-                        (DONE magit-gptcommit--handle-done gptel--fsm-last))))
+            :handlers
+            (let ((keys (-uniq (append (-map #'car gptel-request--handlers)
+                                       (-map #'car magit-gptcommit--gptel-handlers)))))
+              (cl-loop for key in keys
+                       collect
+                       `(,key ,@(-uniq (append (alist-get key magit-gptcommit--gptel-handlers)
+                                               (alist-get key gptel-request--handlers))))))))
 
     (magit-repository-local-set 'magit-gptcommit--active-worker
                                 (make-magit-gptcommit--worker
