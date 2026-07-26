@@ -636,8 +636,10 @@ Executed in the context of the commit message buffer."
 
 MSG is the response.
 INFO is the request metadata."
-  (magit-gptcommit--debug "Stream response received: %s..." (substring msg 0 (min 30 (length msg))))
-  (when-let* ((worker-buf (plist-get info :buffer))
+  (magit-gptcommit--debug "Stream response received: %s..." (--> (format "%S" msg)
+                                                                 (substring it 0 (min 30 (length it)))))
+  (when-let* ((_ (stringp msg))
+              (worker-buf (plist-get info :buffer))
               (start-position (plist-get info :position))
               (tracking-marker (plist-get info :tracking-marker))
               (worker (magit-repository-local-get 'magit-gptcommit--active-worker)))
