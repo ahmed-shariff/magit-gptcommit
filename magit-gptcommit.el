@@ -106,6 +106,8 @@ Returns t if deletion was performed, nil otherwise."
   "GPT generated commit message for current repository.")
 (defvar magit-gptcommit--active-section-list nil
   "List of active gptcommit sections for current repository.")
+(defvar magit-gptcommit--intent-history nil
+  "Previously entered commit intents.")
 (defvar magit-gptcommit--active-worker nil
   "Running gptcommit process for current repository.
 Stored as a cons cell (PROCESS . RESPONSE) where RESPONE is a SSO Message.")
@@ -252,10 +254,11 @@ Value is (CREATION-TIME . MESSAGE) where CREATION-TIME is used to find the newes
 (defvar magit-gptcommit--cache (make-hash-table :test 'equal :size magit-gptcommit-cache-limit)
   "Cache of generated commit messages as a hash table.")
 
-(cl-defun magit-gptcommit--cache-key (content &optional (repository (magit-repository-local-repository)))
-  "Return cache key for CONTENT and REPOSITORY."
+(cl-defun magit-gptcommit--cache-key (content &optional intent
+                                                   (repository (magit-repository-local-repository)))
+  "Return cache key for CONTENT, INTENT, and REPOSITORY."
   ;; set repository to default if not initial
-  (md5 (format "%s%s" repository content)))
+  (md5 (format "%s%s%s" repository intent content)))
 
 (defun magit-gptcommit--cache-set (key value)
   "Set cache VALUE for KEY."
@@ -380,11 +383,12 @@ CONDITION is defined by `magit-section-match'."
   "Insert gptcommit section into status buffer."
   (magit-gptcommit--insert 'staged))
 
-(defun magit-gptcommit--insert (condition &optional no-cache)
+(defun magit-gptcommit--insert (condition &optional no-cache intent)
   "Insert gptcommit section above staged section.
 Staged section position is determined by CONDITION,
 which is defined in `magit-section-match'.
-NO-CACHE is non-nil if cache should be ignored."
+NO-CACHE is non-nil if cache should be ignored.
+INTENT is optional user-provided context for the generated message."
   (magit-gptcommit--debug "Inserting gptcommit section with condition: %s, no-cache: %s"
                           condition no-cache)
   ;; This should error if the backend is not loaded properly.
@@ -399,7 +403,7 @@ NO-CACHE is non-nil if cache should be ignored."
 
       (magit-repository-local-delete 'magit-gptcommit--last-message)
       (let* ((diff (magit-gptcommit--staged-diff))
-             (key (magit-gptcommit--cache-key diff))
+             (key (magit-gptcommit--cache-key diff intent))
              (worker (magit-repository-local-get 'magit-gptcommit--active-worker))
              (oldkey (and worker (magit-gptcommit--worker-key worker))))
         (if-let ((msg (and (not no-cache) (magit-gptcommit--cache-get key))))
@@ -441,7 +445,13 @@ NO-CACHE is non-nil if cache should be ignored."
                 (magit-gptcommit-abort))
               (let* ((start-position (point-marker))
                      (tracking-marker (point-marker))
-                     (prompt (format magit-gptcommit-prompt diff))
+                     (prompt (format "%s%s"
+                                    (format magit-gptcommit-prompt diff)
+                                    (if (string-empty-p (or intent ""))
+                                        ""
+                                      (format
+                                       "\n\nUSER INTENT (use as context; independently review the diff):\n%s"
+                                       intent))))
                      (info (list :prompt prompt
                                  :buffer buf
                                  :position start-position
@@ -478,23 +488,32 @@ NO-CACHE is non-nil if cache should be ignored."
 (defun magit-gptcommit-generate ()
   "Generate gptcommit message and insert it into the buffer."
   (interactive)
-  (magit-gptcommit--debug "Starting new gptcommit generation in buffer %s" (current-buffer))
-  ;; Clear message history when explicitly generating a new message
-  (magit-gptcommit--clear-message-history)
-  (when (magit-gptcommit--running-p)
-    (magit-gptcommit--debug "Aborting existing gptcommit worker before generating new one")
-    (magit-gptcommit-abort))
-  (pcase (current-buffer)
-    ((app (buffer-local-value 'major-mode) 'magit-status-mode)
-     (magit-gptcommit--debug "Removing any existing GPT commit section")
-     (magit-gptcommit-remove-section)
-     (magit-gptcommit--debug "Inserting new GPT commit section with staged changes")
-     (magit-gptcommit--insert 'staged t))
-    ((app (buffer-local-value 'major-mode) 'magit-diff-mode)
-     (magit-gptcommit--debug "GPT commit in diff mode not implemented yet")) ; TODO
-    ((pred (buffer-local-value 'with-editor-mode))
-     (magit-gptcommit--debug "GPT commit in with-editor mode not implemented yet")) ; TODO
-    (_ (user-error "Not in a magit status buffer or with-editor buffer"))))
+  (let ((intent (read-string
+                 "Commit intent (optional; press RET to omit): "
+                 (car magit-gptcommit--intent-history)
+                 'magit-gptcommit--intent-history)))
+    (magit-gptcommit--debug "Starting new gptcommit generation in buffer %s"
+                            (current-buffer))
+    ;; Clear message history when explicitly generating a new message
+    (magit-gptcommit--clear-message-history)
+    (when (magit-gptcommit--running-p)
+      (magit-gptcommit--debug
+       "Aborting existing gptcommit worker before generating new one")
+      (magit-gptcommit-abort))
+    (pcase (current-buffer)
+      ((app (buffer-local-value 'major-mode) 'magit-status-mode)
+       (magit-gptcommit--debug "Removing any existing GPT commit section")
+       (magit-gptcommit-remove-section)
+       (magit-gptcommit--debug
+        "Inserting new GPT commit section with staged changes")
+       (magit-gptcommit--insert 'staged t intent))
+      ((app (buffer-local-value 'major-mode) 'magit-diff-mode)
+       (magit-gptcommit--debug
+        "GPT commit in diff mode not implemented yet")) ; TODO
+      ((pred (buffer-local-value 'with-editor-mode))
+       (magit-gptcommit--debug
+        "GPT commit in with-editor mode not implemented yet")) ; TODO
+      (_ (user-error "Not in a magit status buffer or with-editor buffer")))))
 
 (cl-defun magit-gptcommit-abort (&optional (repository (magit-repository-local-repository)))
   "Abort gptcommit process for current REPOSITORY."
