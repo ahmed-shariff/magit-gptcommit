@@ -1070,11 +1070,19 @@ Call CALLBACK with the response and INFO with partial and full responses."
     (magit-gptcommit--debug "Creating gptel request for buffer: %s" (plist-get info :buffer))
     (magit-gptcommit--debug "Using prompt length: %d characters" (length (plist-get info :prompt)))
     (gptel-request (plist-get info :prompt)
+      :stream gptel-stream
       :callback (lambda (response gptel-info)
                   (unless (plist-get gptel-info :tracking-marker)
                     (plist-put gptel-info :tracking-marker
                                (plist-get info :tracking-marker)))
-                  (funcall callback response gptel-info))
+                  (if (plist-get gptel-info :stream)
+                      (cond
+                       ((stringp response)
+                        (plist-put info :streamed-response
+                                   (concat (plist-get info :streamed-response) response)))
+                       ((eq response t)
+                        (funcall callback (plist-get info :streamed-response) gptel-info)))
+                    (funcall callback response gptel-info)))
       :buffer (plist-get info :buffer)
       :position (plist-get info :position)
       :fsm (gptel-make-fsm
