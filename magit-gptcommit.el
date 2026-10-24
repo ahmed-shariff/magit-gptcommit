@@ -148,8 +148,13 @@ THE FILE DIFFS:
 Now, write the commit message using this format: [label]: [summary]")
 
 (defcustom magit-gptcommit-prompt magit-gptcommit-prompt-one-line
-  "The prompt that was used to generate the commit message."
-  :type 'string
+  "The prompt used to generate the commit message.
+Can be a string with a single \"%s\" which will be replaced by the
+diff or it can be a function that takes a single string, the diff, and
+return a prompt."
+  :type '(choice
+          (string :tag "String prompt")
+          (function :tag "Function that takes diff string and return a prompt."))
   :group 'magit-gptcommit)
 
 ;; (defun magit-gptcommit-load-prompt ()
@@ -446,7 +451,10 @@ INTENT is optional user-provided context for the generated message."
               (let* ((start-position (point-marker))
                      (tracking-marker (point-marker))
                      (prompt (format "%s%s"
-                                    (format magit-gptcommit-prompt diff)
+                                     (cl-typecase magit-gptcommit-prompt
+                                       (string (format magit-gptcommit-prompt diff))
+                                       (function (funcall magit-gptcommit-prompt diff))
+                                       (t (user-error "Unknown type for `magit-gptcommit-prompt'")))
                                     (if (string-empty-p (or intent ""))
                                         ""
                                       (format
